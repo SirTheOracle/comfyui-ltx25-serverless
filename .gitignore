@@ -1,0 +1,20 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Local model files must never be committed — they are mirrored to R2.
+*.safetensors
+*.ckpt
+*.pt
+
+# Test artifacts
+*.mp4
+*.webm
+/output/
+/input/
+
+.DS_Store
+.env
