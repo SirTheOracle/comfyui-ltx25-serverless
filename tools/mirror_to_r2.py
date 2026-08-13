@@ -59,12 +59,26 @@ BURST_TIMEOUT = int(os.environ.get("BURST_TIMEOUT", "900"))
 DELETE_AFTER_UPLOAD = os.environ.get("KEEP_LOCAL", "0") != "1"
 
 _log_lines = []
+_s3 = None
+_bucket = None
 
 
-def log(msg):
+def log(msg, flush_remote=False):
+    """Log to stdout and accumulate; optionally push to R2 immediately.
+
+    The remote flush matters operationally: a pod is billable and its console is the
+    only place stdout lands, so pushing the log into the bucket after each file makes
+    progress observable from anywhere and survives a dropped session.
+    """
     line = f"{time.strftime('%H:%M:%S')} {msg}"
     print(line, flush=True)
     _log_lines.append(line)
+    if flush_remote and _s3 is not None:
+        try:
+            _s3.put_object(Bucket=_bucket, Key="_poc/migrate.log",
+                           Body=("\n".join(_log_lines) + "\n").encode())
+        except Exception:       # noqa: BLE001 — never let logging kill the transfer
+            pass
 
 
 def need(var):
@@ -112,20 +126,22 @@ def main():
 
     import boto3
     from boto3.s3.transfer import TransferConfig
+    global _s3, _bucket
     s3 = boto3.client("s3", endpoint_url=endpoint,
                       aws_access_key_id=ak, aws_secret_access_key=sk, region_name="auto")
+    _s3, _bucket = s3, bucket
     # R2 caps multipart parts; 128 MB chunks keeps a 21 GB file well under the limit.
     xfer = TransferConfig(multipart_threshold=256 << 20, multipart_chunksize=128 << 20,
                           max_concurrency=8, use_threads=True)
 
     os.makedirs(WORKDIR, exist_ok=True)
-    log(f"STARTED mirror -> {bucket} ({len(FILES)} files)")
+    log(f"STARTED mirror -> {bucket} ({len(FILES)} files)", flush_remote=True)
     results = []
 
     for base, subdir, hfpath in FILES:
         url = f"https://huggingface.co/{REPO}/resolve/main/{hfpath}"
         dest = os.path.join(WORKDIR, base)
-        log(f"=== FILE {base} ===")
+        log(f"=== FILE {base} ===", flush_remote=True)
 
         if os.path.exists(dest):
             log(f"  {base} already present locally ({os.path.getsize(dest):,}B); skipping download")
@@ -136,7 +152,7 @@ def main():
 
         size = os.path.getsize(dest)
         digest = sha256(dest)
-        log(f"  {base} size={size:,}B sha256={digest}")
+        log(f"  {base} size={size:,}B sha256={digest}", flush_remote=True)
 
         # Flat basenames: start.sh presigns `bucket/<basename>` and builds
         # `${R2_BASE}/<basename>` — a subdirectory key would break BOTH rungs.
@@ -148,14 +164,14 @@ def main():
         head = s3.head_object(Bucket=bucket, Key=base)
         if head["ContentLength"] != size:
             raise RuntimeError(f"{base}: R2 size {head['ContentLength']} != local {size}")
-        log(f"  {base} readback size OK")
+        log(f"  {base} readback size OK", flush_remote=True)
 
         results.append((base, subdir, size, digest, f"{REPO}/resolve/main/{hfpath}"))
         if DELETE_AFTER_UPLOAD:
             os.remove(dest)
             log(f"  {base} local copy removed")
 
-    log("ALL FILES MIRRORED ✅")
+    log("ALL FILES MIRRORED ✅", flush_remote=True)
     total = sum(r[2] for r in results)
     log(f"total {total:,}B ({total/1e9:.2f} GB)")
 
