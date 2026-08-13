@@ -848,10 +848,17 @@ def handler(job: Dict) -> Dict:
         defaults = DEFAULT_PARAMS_CUSTOM_AUDIO if has_custom_audio else DEFAULT_PARAMS_GENERATED
 
         # --- validation (D4) -------------------------------------------------
+        # NO multiple-of-32 constraint. EmptyLTXVLatentVideo declares step=32, but that is
+        # a UI increment hint — ComfyUI validates min/max, not step — and the VAE handles
+        # off-step sizes internally. LTX-2.3 shipped 1280x720 and 720x1280 with no
+        # alignment check and ran them in production for months. An earlier revision
+        # enforced multiple_of=32 here, which rejected BOTH modes' own documented
+        # defaults (720 is 16x45, not a multiple of 32) and failed every job at the
+        # entry boundary. Do not reintroduce it without evidence from a real render.
         width = _require_int("width", job_input.get("width", defaults["width"]),
-                             minimum=32, maximum=4096, multiple_of=32)
+                             minimum=32, maximum=4096)
         height = _require_int("height", job_input.get("height", defaults["height"]),
-                              minimum=32, maximum=4096, multiple_of=32)
+                              minimum=32, maximum=4096)
         fps = _require_int("fps", job_input.get("fps", defaults["fps"]), minimum=1, maximum=120)
         cfg = _require_finite("cfg", job_input.get("cfg", defaults["cfg"]))
         raw_audio_cfg = job_input.get("audio_cfg")

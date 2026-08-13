@@ -253,3 +253,45 @@ class TestOutputExtraction:
     def test_returns_none_when_named_file_absent(self):
         outputs = {"9": {"videos": [{"filename": "does_not_exist.mp4", "subfolder": ""}]}}
         assert H.get_output_video(outputs) is None
+
+
+# ---------------------------------------------------------------------------
+# Regression: the shipped defaults must survive our own validators
+# ---------------------------------------------------------------------------
+class TestDefaultsPassValidation:
+    """A validator stricter than the service's own defaults fails 100% of jobs.
+
+    This shipped once: an earlier revision enforced multiple_of=32 on width/height,
+    which rejects 720 (16*45). 720 is the DEFAULT height for generated_audio and the
+    DEFAULT width for custom_audio, so every job in both modes failed at the entry
+    boundary with INVALID_INPUT — after a clean 40 GB cold boot. The 46 tests that
+    existed at the time all passed, because none of them fed the defaults through
+    the validators.
+    """
+
+    @pytest.mark.parametrize("mode,defaults", [
+        ("generated_audio", H.DEFAULT_PARAMS_GENERATED),
+        ("custom_audio", H.DEFAULT_PARAMS_CUSTOM_AUDIO),
+    ])
+    def test_dimensions(self, mode, defaults):
+        assert H._require_int("width", defaults["width"], minimum=32, maximum=4096)
+        assert H._require_int("height", defaults["height"], minimum=32, maximum=4096)
+
+    @pytest.mark.parametrize("mode,defaults", [
+        ("generated_audio", H.DEFAULT_PARAMS_GENERATED),
+        ("custom_audio", H.DEFAULT_PARAMS_CUSTOM_AUDIO),
+    ])
+    def test_fps_and_cfg(self, mode, defaults):
+        assert H._require_int("fps", defaults["fps"], minimum=1, maximum=120)
+        assert H._require_finite("cfg", defaults["cfg"]) == 1.0
+
+    def test_generated_frame_count(self):
+        fc = H.DEFAULT_PARAMS_GENERATED["frame_count"]
+        assert H._require_int("frame_count", fc, minimum=9) == fc
+        assert H._snap_frames(fc) == fc, "default frame_count must already be on-grid"
+
+    def test_ltx23_proven_resolutions_are_accepted(self):
+        """Both orientations LTX-2.3 ran in production must remain valid."""
+        for w, h in ((1280, 720), (720, 1280), (1920, 1080), (1080, 1920)):
+            assert H._require_int("width", w, minimum=32, maximum=4096) == w
+            assert H._require_int("height", h, minimum=32, maximum=4096) == h

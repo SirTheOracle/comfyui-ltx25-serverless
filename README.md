@@ -38,7 +38,7 @@ carried unchanged from LTX-2.3 so existing callers keep working.
     "prompt": "...",                  // required
     "audio": "<base64 mp3>",          // optional; presence+truthiness selects custom_audio
     "negative_prompt": "...",         // default: "pc game, console game, video game, cartoon, childish, ugly"
-    "width": 1280, "height": 720,     // must be multiples of 32
+    "width": 1280, "height": 720,     // 32..4096; no alignment constraint
     "frame_count": 121,               // generated_audio only; snapped UP to the 8k+1 grid
     "fps": 25,
     "cfg": 1.0,
