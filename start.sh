@@ -74,11 +74,12 @@ PYEOF
 
 # basename | dest-subdir | size(bytes) | sha256 | huggingface resolve path
 #
-# !!! SIZES AND SHA-256 BELOW ARE PLACEHOLDERS !!!
-# They MUST be replaced with values measured from the actual uploaded R2 objects
-# (`stat -c%s` + `sha256sum`) during the mirror seed. The sizes are HF-API
-# approximations and the hashes are not yet known. The build must not ship until
-# these are real — a wrong sha256 fails every download and hard-exits the worker.
+# Sizes and SHA-256 below were MEASURED from the bytes actually uploaded to R2 during
+# the mirror seed on 2026-08-13 (39.71 GB total, 12m23s, zero download retries) — not
+# read from HuggingFace metadata. See _poc/migrate.log and _poc/manifest.txt in the
+# anim8-ltx25-models bucket, and tools/mirror_to_r2.py / tools/apply_manifest.py.
+# Regenerate with apply_manifest.py; never hand-edit, and never deploy a
+# manifest/R2 mismatch — a wrong sha256 fails every download and hard-exits the worker.
 #
 # Dropped vs LTX-2.3 (deliberate):
 #   - the abliterated Gemma CLIP LoRA: no 2.5 equivalent exists, and it was load-bearing
@@ -88,11 +89,11 @@ PYEOF
 #   - the temporal upscaler and duration head: zero references across all 9 Lightricks
 #     2.5 examples and all 3 Comfy-Org 2.5 templates.
 read -r -d '' MODELS <<'EOF'
-ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors|diffusion_models|REPLACE_SIZE|REPLACE_SHA256|Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
-gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors|text_encoders|REPLACE_SIZE|REPLACE_SHA256|Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
-ltx-2.5-video-vae-bf16.safetensors|vae|REPLACE_SIZE|REPLACE_SHA256|Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors
-ltx-2.5-audio-vae-bf16.safetensors|vae|REPLACE_SIZE|REPLACE_SHA256|Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors
-ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors|latent_upscale_models|REPLACE_SIZE|REPLACE_SHA256|Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
+ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors|diffusion_models|21504034224|c4279eeff115cbeaca494bd2183e7d768c38fe85a184dc6afbb7159157c44334|Lightricks/LTX-2.5/resolve/main/diffusion_models/ltx-2.5-22b-distilled-transformer-comfy-int8-convrot.safetensors
+gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors|text_encoders|15372971786|09a89e084de1a149c3de60cfe9dfd3e5161967eb09eea39e806fcdeffdd568de|Lightricks/LTX-2.5/resolve/main/text_encoders/gemma4-12b-with-proj-ltx-2.5-comfy-int8-convrot.safetensors
+ltx-2.5-video-vae-bf16.safetensors|vae|1472223346|847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3|Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-video-vae-bf16.safetensors
+ltx-2.5-audio-vae-bf16.safetensors|vae|364866540|c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5|Lightricks/LTX-2.5/resolve/main/vae/ltx-2.5-audio-vae-bf16.safetensors
+ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors|latent_upscale_models|995778752|eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8|Lightricks/LTX-2.5/resolve/main/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors
 EOF
 
 if [ -z "$HF_TOKEN" ]; then
