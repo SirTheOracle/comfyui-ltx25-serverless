@@ -208,15 +208,25 @@ INFRA_ERROR_CODES = {
 #   - tools/check_node_map.py (build-time static validation, Item 7a)
 #   - tools/check_node_registration.sh (build-time /object_info check, Item 7b)
 #
-# !!! NODE IDs ARE PLACEHOLDERS ("TBD:*") !!!
-# The real IDs are only knowable after the Comfy-Org template
-# (workflow_templates v0.11.39 -> templates/video_ltx2_5_i2v.json) is flattened
-# from UI/subgraph format to flat API format, which renumbers every node.
-# check_node_map.py FAILS while any TBD:* remains, so this cannot ship half-done.
+# IDs are real, derived from the committed workflow JSONs. Both graphs come from
+# Comfy-Org workflow_templates v0.11.39 -> templates/video_ltx2_5_i2v.json, converted
+# to API format and validated by ComfyUI's own /prompt validator (QUEUED OK, zero
+# node_errors).
 #
-# The `class_type` and `input_key` columns are NOT placeholders — they were read
-# directly from the pinned template and are the diff target for the flatten.
-# Pre-flatten template IDs are noted in comments for orientation.
+# ID SHAPE: ComfyUI's API export does NOT renumber subgraph nodes — it NAMESPACES them
+# as "<subgraph_instance_id>:<inner_id>". The i2v template's subgraph instance is node
+# 398, so its 47 inner nodes become "398:*", while top-level nodes keep plain ids
+# (395 LoadImage, 75 SaveVideo). This mirrors LTX-2.3 exactly, whose graph is 46
+# "267:*" nodes plus plain 269/75.
+#
+# Nodes we ADDED for the custom-audio graft use plain numeric ids 900+ so they are
+# visibly distinct from the template's 398:* namespace.
+#
+# Inputs deliberately NOT mapped, because a link already drives them from a node we
+# do write — mapping them too would be redundant and could desync:
+#   * SolidMask.width/height        <- the width/height primitives
+#   * TrimAudioDuration.duration    <- the duration primitive
+#   * LTXVEmptyLatentAudio.frames_number <- the frame_count primitive (generated only)
 # ===========================================================================
 
 class NodeRef(NamedTuple):
@@ -226,49 +236,63 @@ class NodeRef(NamedTuple):
 
 
 _COMMON = {
-    #  semantic field          NodeRef(node_id,           class_type,                input_key)
-    "image":                   NodeRef("TBD:load_image",   "LoadImage",              "image"),
-    "prompt":                  NodeRef("TBD:prompt",       "PrimitiveStringMultiline", "value"),
-    "negative_prompt":         NodeRef("TBD:negprompt",    "CLIPTextEncode",         "text"),      # template node 373
-    "width":                   NodeRef("TBD:latent_video", "EmptyLTXVLatentVideo",   "width"),     # template node 356
-    "height":                  NodeRef("TBD:latent_video", "EmptyLTXVLatentVideo",   "height"),
-    "img_compression":         NodeRef("TBD:preprocess",   "LTXVPreprocess",         "img_compression"),  # node 350, default 18
-    "i2v_strength_first":      NodeRef("TBD:i2v_first",    "LTXVImgToVideoInplace",  "strength"),  # node 349, default 1.0
-    "i2v_strength_second":     NodeRef("TBD:i2v_second",   "LTXVImgToVideoInplace",  "strength"),  # node 357, default 0.7
-    "seed":                    NodeRef("TBD:noise",        "RandomNoise",            "noise_seed"),
+    #  semantic field          NodeRef(node_id,      class_type,                  input_key)
+    "image":                   NodeRef("395",        "LoadImage",                 "image"),
+    "prompt":                  NodeRef("398:376",    "PrimitiveStringMultiline",  "value"),
+    "negative_prompt":         NodeRef("398:373",    "CLIPTextEncode",            "text"),
+    # width/height feed `a/2` math into the half-resolution stage-1 latent, then the
+    # spatial upscaler restores full size — the same topology LTX-2.3 uses. Their
+    # `value` arrives as a link from the ResolutionSelector; writing a literal
+    # overrides it, and the key exists either way so _set's guard is satisfied.
+    "width":                   NodeRef("398:372",    "PrimitiveInt",              "value"),
+    "height":                  NodeRef("398:360",    "PrimitiveInt",              "value"),
+    "fps":                     NodeRef("398:361",    "PrimitiveInt",              "value"),
+    "img_compression":         NodeRef("398:350",    "LTXVPreprocess",            "img_compression"),
+    # STAGE ORDER, not template widget order: 398:357 feeds the stage-1 concat (398:377
+    # -> sampler 398:344, 8-step); 398:349 feeds stage 2 (398:340 -> sampler 398:368,
+    # 3-step). The template's own defaults are 0.7 and 1.0 respectively, i.e. inverted
+    # relative to LTX-2.3's first=1.0/second=0.7 — see the note in Item 4b of the plan.
+    "i2v_strength_first":      NodeRef("398:357",    "LTXVImgToVideoInplace",     "strength"),
+    "i2v_strength_second":     NodeRef("398:349",    "LTXVImgToVideoInplace",     "strength"),
+    # TWO noise nodes — one per sampler. Both must be written or stage 2 keeps the
+    # template's hardcoded seed 42 and the job is only half-deterministic.
+    "seed_stage1":             NodeRef("398:339",    "RandomNoise",               "noise_seed"),
+    "seed_stage2":             NodeRef("398:338",    "RandomNoise",               "noise_seed"),
     # Dual CFG (Ruling 9): LTX-2.5 replaced CFGGuider with LTXVDualCFGGuider, which
     # declares video_cfg + audio_cfg instead of a single `cfg`. Writing "cfg" here would
     # create an undeclared key and the caller's cfg would be SILENTLY IGNORED.
-    "cfg_stage1":              NodeRef("TBD:guider1",      "LTXVDualCFGGuider",      "video_cfg"), # node 388
-    "audio_cfg_stage1":        NodeRef("TBD:guider1",      "LTXVDualCFGGuider",      "audio_cfg"),
-    "cfg_stage2":              NodeRef("TBD:guider2",      "LTXVDualCFGGuider",      "video_cfg"), # node 391
-    "audio_cfg_stage2":        NodeRef("TBD:guider2",      "LTXVDualCFGGuider",      "audio_cfg"),
+    "cfg_stage1":              NodeRef("398:388",    "LTXVDualCFGGuider",         "video_cfg"),
+    "audio_cfg_stage1":        NodeRef("398:388",    "LTXVDualCFGGuider",         "audio_cfg"),
+    "cfg_stage2":              NodeRef("398:391",    "LTXVDualCFGGuider",         "video_cfg"),
+    "audio_cfg_stage2":        NodeRef("398:391",    "LTXVDualCFGGuider",         "audio_cfg"),
     # Sigma nodes. stage1 == the 9-value/8-step list; stage2 == the 4-value/3-step list.
-    "sigmas_stage1":           NodeRef("TBD:sigmas1",      "ManualSigmas",           "sigmas"),    # node 397 (8-step)
-    "sigmas_stage2":           NodeRef("TBD:sigmas2",      "ManualSigmas",           "sigmas"),    # node 396 (3-step)
+    # Verified byte-identical to JSON_SIGMAS_REFINE / JSON_SIGMAS_FIRST above.
+    "sigmas_stage1":           NodeRef("398:397",    "ManualSigmas",              "sigmas"),
+    "sigmas_stage2":           NodeRef("398:396",    "ManualSigmas",              "sigmas"),
 }
 
 NODE_MAP: Dict[str, Dict[str, NodeRef]] = {
     "generated_audio": {
         **_COMMON,
-        "frame_count":         NodeRef("TBD:latent_video", "EmptyLTXVLatentVideo",   "length"),
-        "audio_frames":        NodeRef("TBD:latent_audio", "LTXVEmptyLatentAudio",   "frames_number"),  # node 366
-        "fps":                 NodeRef("TBD:latent_audio", "LTXVEmptyLatentAudio",   "fps"),
+        # One primitive drives BOTH EmptyLTXVLatentVideo.length and
+        # LTXVEmptyLatentAudio.frames_number, so the video and audio streams cannot
+        # disagree on length. The handler snaps before writing; the graph does not
+        # re-derive it (the template's `duration * fps + 1` math node was removed).
+        "frame_count":         NodeRef("398:362",    "PrimitiveInt",              "value"),
     },
     "custom_audio": {
         **_COMMON,
-        # custom_audio derives its length from the audio clip via the graph's math node,
-        # exactly as LTX-2.3 does — the handler writes the DURATION, not the frame count.
-        "audio_file":          NodeRef("TBD:load_audio",   "LoadAudio",              "audio"),
-        "duration":            NodeRef("TBD:duration",     "PrimitiveFloat",         "value"),
-        "trim_duration":       NodeRef("TBD:trim_audio",   "TrimAudioDuration",      "duration"),
-        # SolidMask dimensions must track width/height so the zero mask covers the latent.
-        "mask_width":          NodeRef("TBD:solidmask",    "SolidMask",              "width"),
-        "mask_height":         NodeRef("TBD:solidmask",    "SolidMask",              "height"),
+        # custom_audio derives its length from the clip via a graph math node
+        # (`1 + ceil(a*b/8)*8`), exactly as LTX-2.3 does — the handler writes the
+        # DURATION, not the frame count. Rounding UP is load-bearing: see _snap_frames.
+        "audio_file":          NodeRef("900",        "LoadAudio",                 "audio"),
+        "duration":            NodeRef("901",        "PrimitiveFloat",            "value"),
     },
 }
 
 # Sentinel prefix for un-flattened IDs. check_node_map.py hard-fails on any of these.
+# Retained as a guard: if the graphs are ever regenerated and the map is reset to
+# placeholders, the build fails rather than shipping a half-wired handler.
 PLACEHOLDER_PREFIX = "TBD:"
 
 
@@ -646,9 +670,13 @@ def _apply_common(workflow: Dict, params: Dict, m: Dict[str, NodeRef], image_fil
     _set(workflow, m["width"], params["width"])
     _set(workflow, m["height"], params["height"])
     _set(workflow, m["img_compression"], params["img_compression"])
+    _set(workflow, m["fps"], params["fps"])
     _set(workflow, m["i2v_strength_first"], params["i2v_strength_first"])
     _set(workflow, m["i2v_strength_second"], params["i2v_strength_second"])
-    _set(workflow, m["seed"], params["seed"])
+    # Both samplers get the same seed. Leaving stage 2 on the template's hardcoded 42
+    # would make a "fixed seed" job only half-reproducible.
+    _set(workflow, m["seed_stage1"], params["seed"])
+    _set(workflow, m["seed_stage2"], params["seed"])
     # Dual CFG on BOTH stages. audio_cfg defaults to cfg, which reproduces LTX-2.3's
     # single-CFG behaviour exactly (Guider_LTXAVDualCFG delegates to the single-CFG path
     # when the two values are close).
@@ -668,9 +696,9 @@ def modify_workflow_generated_audio(workflow: Dict, params: Dict, image_filename
     """
     m = NODE_MAP["generated_audio"]
     _apply_common(workflow, params, m, image_filename)
+    # Drives EmptyLTXVLatentVideo.length AND LTXVEmptyLatentAudio.frames_number via one
+    # primitive, so the two streams cannot disagree on length.
     _set(workflow, m["frame_count"], params["frame_count"])
-    _set(workflow, m["audio_frames"], params["frame_count"])
-    _set(workflow, m["fps"], params["fps"])
     return workflow
 
 
@@ -684,11 +712,9 @@ def modify_workflow_custom_audio(workflow: Dict, params: Dict, audio_duration: f
     m = NODE_MAP["custom_audio"]
     _apply_common(workflow, params, m, image_filename)
     _set(workflow, m["audio_file"], audio_filename)
+    # TrimAudioDuration.duration and the frame-count math both read this primitive by
+    # link, and SolidMask tracks width/height the same way — so this one write is enough.
     _set(workflow, m["duration"], audio_duration)
-    _set(workflow, m["trim_duration"], audio_duration)
-    # The zero mask must cover the full latent, so it tracks the requested resolution.
-    _set(workflow, m["mask_width"], params["width"])
-    _set(workflow, m["mask_height"], params["height"])
     return workflow
 
 
